@@ -1,1 +1,81 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat</title>
+    <link rel="stylesheet" href="{% static 'home/css/chat.css' %}">
+</head>
+<body>
+    <div class="app">
+        <aside class="people-panel" id="peoplePanel">
+            <div class="panel-header">People</div>
 
+            <div class="search-wrap">
+                <input type="search" id="searchInput" placeholder="Search users..." autocomplete="off">
+            </div>
+            <div id="searchResults" class="search-results hidden"></div>
+
+            <div class="people-scroll">
+                <section class="people-section">
+                    <h3>Friends</h3>
+                    <div id="friendsList" class="user-list"></div>
+                </section>
+                <section class="people-section">
+                    <h3>Requests Received</h3>
+                    <div id="requestsReceivedList" class="user-list"></div>
+                </section>
+                <section class="people-section">
+                    <h3>Requests Sent</h3>
+                    <div id="requestsSentList" class="user-list"></div>
+                </section>
+                <section class="people-section">
+                    <h3>Blocked Users</h3>
+                    <div id="blockedList" class="user-list"></div>
+                </section>
+            </div>
+        </aside>
+
+        <main class="chat-panel">
+            <div class="chat-header-wrap">
+                <div class="chat-header-top">
+                    <span class="chat-header-name" id="chatHeader"></span>
+                    <div id="chatHeaderActions" class="chat-header-actions hidden"></div>
+                </div>
+                <p id="chatHeaderNotice" class="chat-header-notice hidden"></p>
+            </div>
+
+            <div class="messages-area" id="messagesArea">
+                <p class="empty-chat" id="noChatSelected">Select a conversation</p>
+                <div id="messagesList"></div>
+            </div>
+
+            <p id="chatError" class="chat-error hidden" role="alert"></p>
+
+            <div class="chat-footer">
+                <div id="messageInputArea" class="message-input-area hidden">
+                    <input type="text" id="messageInput" placeholder="Type a message..." autocomplete="off">
+                    <button type="button" id="sendBtn" class="btn btn-primary">Send</button>
+                </div>
+            </div>
+        </main>
+
+        <aside class="profile-panel">
+            <h2>Profile</h2>
+            <p class="profile-label">Current username</p>
+            <p id="currentUsername" data-auth-username="{{ user.username }}">
+                {% if user.profile %}{{ user.profile.username }}{% else %}{{ user.username }}{% endif %}
+            </p>
+            <form id="usernameForm">
+                <input type="text" id="newUsernameInput" placeholder="New username" maxlength="16" autocomplete="off">
+                <button type="submit" class="btn btn-primary">Save</button>
+            </form>
+            <p id="usernameMessage" class="form-message hidden" role="alert"></p>
+            <a href="/accounts/logout/" class="logout-btn">Logout</a>
+        </aside>
+    </div>
+
+    <script src="{% static 'home/js/chat.js' %}"></script>
+</body>
+</html>

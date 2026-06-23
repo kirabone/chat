@@ -22,5 +22,6 @@ urlpatterns = [
     path('accounts/', include('allauth.urls')),
     path('messanging/', include("messanging.urls")),
     path("relationship/", include("relationship.urls")),
-    path("", include("home.urls"))
+    path("", include("home.urls")),
+    path('profile/', include("userProfile.urls"))
 ]

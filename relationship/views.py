@@ -1,5 +1,6 @@
 from django.shortcuts import render
 from .models import Relationship
+from django.contrib.auth.models import User
 from django.http import JsonResponse, HttpResponse
 from django.db.models import Q
 from userProfile.models import Profile
@@ -99,54 +100,65 @@ def cancelRequest(request, user):
         Relationship.objects.filter(actor = request.user, acted = target.user, status="R").delete()
         return HttpResponse("success")
 
-def search(request,search_query):
+def _relationship_status(request_user, target_user):
+    if Relationship.objects.filter(
+        Q(actor=request_user, acted=target_user, status="B") |
+        Q(actor=target_user, acted=request_user, status="B")
+    ).exists():
+        return "blocked"
 
-     
-    
-    if not search_query or len(search_query) < 1:
-        return JsonResponse({"error": "Search query required"}, status=400)
-    
+    if Relationship.objects.filter(
+        Q(actor=request_user, acted=target_user, status="F") |
+        Q(actor=target_user, acted=request_user, status="F")
+    ).exists():
+        return "friend"
 
-    profiles = Profile.objects.filter(
-        Q(username__icontains=search_query) | Q(user__first_name__icontains=search_query) | Q(user__last_name__icontains=search_query)
-    ).exclude(user=request.user)
-    
+    if Relationship.objects.filter(
+        actor=request_user, acted=target_user, status="R"
+    ).exists():
+        return "request_sent"
+
+    if Relationship.objects.filter(
+        actor=target_user, acted=request_user, status="R"
+    ).exists():
+        return "request_received"
+
+    return "none"
+
+
+def search(request, search_query=""):
+    if search_query is None:
+        search_query = ""
+
+    users = User.objects.exclude(pk=request.user.pk)
+
+    if search_query:
+        users = users.filter(
+            Q(username__icontains=search_query) |
+            Q(first_name__icontains=search_query) |
+            Q(last_name__icontains=search_query) |
+            Q(profile__username__icontains=search_query)
+        )
+
+    users = users.distinct()
+
     results = []
-    
-    for profile in profiles:
-        target_user = profile.user
-        
-        
-        status = "none"
-        
-        if Relationship.objects.filter(
-            Q(actor=request.user, acted=target_user, status="B") |
-            Q(actor=target_user, acted=request.user, status="B")
-        ).exists():
-            status = "blocked"
-  
-        elif Relationship.objects.filter(
-            actor=request.user, acted=target_user, status="F"
-        ).exists() and Relationship.objects.filter(
-            actor=target_user, acted=request.user, status="F"
-        ).exists():
-            status = "friend"
-       
-        elif Relationship.objects.filter(
-            actor=request.user, acted=target_user, status="R"
-        ).exists():
-            status = "request_sent"
-        
-        elif Relationship.objects.filter(
-            actor=target_user, acted=request.user, status="R"
-        ).exists():
-            status = "request_received"
-        
+
+    for target_user in users:
+        profile = Profile.objects.filter(user=target_user).first()
+        if not profile:
+            profile = Profile.objects.create(
+                user=target_user,
+                username=target_user.username[:16],
+            )
+
+        status = _relationship_status(request.user, target_user)
+
         results.append({
             "username": profile.username,
-            "status": status
+            "status": status,
         })
-    
+
     return JsonResponse(results, safe=False)
 
 def unfriend(request, user):

@@ -3,6 +3,7 @@ from . import views
 
 urlpatterns = [
     path("search/", views.search),
+    path("search/<str:search_query>/", views.search),
     path("friends/", views.friendList),
     path("blocks/", views.blockList),
     path("requests/sent/", views.requestSent),
@@ -14,5 +15,4 @@ urlpatterns = [
     path("request/accept/<str:user>/", views.accept),
     path("request/reject/<str:user>/", views.reject),
     path("unfriend/<str:user>/", views.unfriend),
-    path("search/<str:search_query>", views.search)
 ]
