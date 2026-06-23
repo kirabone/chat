@@ -18,11 +18,10 @@
     var searchRequestId = 0;
     var SEARCH_DEBOUNCE_MS = 275;
 
-
-    /* Profile usernames of users I have blocked (from /relationship/blocks/) */
     var blockedByMe = {};
-
     var els = {};
+
+    /* ── DOM init ───────────────────────────────────────────── */
 
     function initElements() {
         els.searchInput = document.getElementById("searchInput");
@@ -30,6 +29,7 @@
         els.friendsList = document.getElementById("friendsList");
         els.requestsReceivedList = document.getElementById("requestsReceivedList");
         els.requestsSentList = document.getElementById("requestsSentList");
+        els.requestsReceivedBadge = document.getElementById("requestsReceivedBadge");
         els.blockedList = document.getElementById("blockedList");
         els.chatHeader = document.getElementById("chatHeader");
         els.chatHeaderActions = document.getElementById("chatHeaderActions");
@@ -54,14 +54,23 @@
         return div.innerHTML;
     }
 
-    function getCookie(name) {
-        var value = "; " + document.cookie;
-        var parts = value.split("; " + name + "=");
-        if (parts.length === 2) {
-            return parts.pop().split(";").shift();
-        }
-        return "";
+    function statusLabel(status) {
+        return STATUS_LABELS[status] || status;
     }
+
+    function isValidStatus(status) {
+        return VALID_STATUSES.indexOf(status) !== -1;
+    }
+
+    function isBlockedByMe(profileUsername) {
+        return Boolean(blockedByMe[profileUsername]);
+    }
+
+    function isActionSuccess(text) {
+        return text === "success" || text === "succss";
+    }
+
+    /* ── UI feedback ────────────────────────────────────────── */
 
     function showChatError(message) {
         if (!message) {
@@ -83,96 +92,64 @@
         els.chatHeaderNotice.classList.remove("hidden");
     }
 
-    function fetchJSON(url) {
-        return fetch(url, { credentials: "same-origin" }).then(function (res) {
-            return res.text().then(function (text) {
-                if (!res.ok) {
-                    throw new Error(text || ("Request failed: " + res.status));
-                }
-                return JSON.parse(text);
-            });
-        });
+    function updateRequestsReceivedBadge(count) {
+        if (!els.requestsReceivedBadge) {
+            return;
+        }
+        if (count > 0) {
+            els.requestsReceivedBadge.textContent = String(count);
+            els.requestsReceivedBadge.classList.remove("hidden");
+        } else {
+            els.requestsReceivedBadge.classList.add("hidden");
+        }
     }
 
-    function fetchText(url, options) {
-        options = options || {};
-        options.credentials = "same-origin";
-        return fetch(url, options).then(function (res) {
-            return res.text().then(function (text) {
-                return { ok: res.ok, status: res.status, text: text };
-            });
-        });
+    /* ── User resolution (list endpoints return User.username) ─ */
+
+    async function resolveAuthUsername(authUsername, expectedStatus) {
+        try {
+            var results = await ChatApi.searchUsers(authUsername);
+            var match = results.find(function (r) { return r.status === expectedStatus; });
+            if (!match && results.length === 1) {
+                match = results[0];
+            }
+            if (!match && results.length > 0) {
+                match = results[0];
+            }
+            if (!match) {
+                return null;
+            }
+            return {
+                profileUsername: match.username,
+                authUsername: authUsername,
+                status: match.status
+            };
+        } catch (err) {
+            return null;
+        }
     }
 
-    function statusLabel(status) {
-        return STATUS_LABELS[status] || status;
+    async function fetchUserStatus(profileUsername) {
+        try {
+            var results = await ChatApi.fetchUserStatus(profileUsername);
+            var match = results.find(function (r) { return r.username === profileUsername; });
+            if (!match && results.length > 0) {
+                match = results[0];
+            }
+            if (!match || !isValidStatus(match.status)) {
+                return null;
+            }
+            return {
+                profileUsername: match.username,
+                authUsername: null,
+                status: match.status
+            };
+        } catch (err) {
+            return null;
+        }
     }
 
-    function isValidStatus(status) {
-        return VALID_STATUSES.indexOf(status) !== -1;
-    }
-
-    function actionUrl(action, profileUsername) {
-        var p = encodeURIComponent(profileUsername);
-        var urls = {
-            unfriend: "/relationship/unfriend/" + p + "/",
-            block: "/relationship/block/" + p + "/",
-            unblock: "/relationship/unblock/" + p + "/",
-            request: "/relationship/request/" + p + "/",
-            cancel: "/relationship/request/cancel/" + p + "/",
-            accept: "/relationship/request/accept/" + p + "/",
-            reject: "/relationship/request/reject/" + p + "/"
-        };
-        return urls[action];
-    }
-
-
-    function isBlockedByMe(profileUsername) {
-        return Boolean(blockedByMe[profileUsername]);
-    }
-
-    function resolveAuthUsername(authUsername, expectedStatus) {
-        return fetchJSON("/relationship/search/" + encodeURIComponent(authUsername) + "/")
-            .then(function (results) {
-                var match = results.find(function (r) { return r.status === expectedStatus; });
-                if (!match && results.length === 1) {
-                    match = results[0];
-                }
-                if (!match && results.length > 0) {
-                    match = results[0];
-                }
-                if (!match) {
-                    return null;
-                }
-                return {
-                    profileUsername: match.username,
-                    authUsername: authUsername,
-                    status: match.status
-                };
-            });
-    }
-
-    function fetchUserStatus(profileUsername) {
-        return fetchJSON("/relationship/search/" + encodeURIComponent(profileUsername) + "/")
-            .then(function (results) {
-                var match = results.find(function (r) { return r.username === profileUsername; });
-                if (!match && results.length > 0) {
-                    match = results[0];
-                }
-                if (!match || !isValidStatus(match.status)) {
-                    return null;
-                }
-                return {
-                    profileUsername: match.username,
-                    authUsername: null,
-                    status: match.status
-                };
-            });
-    }
-
-    function buildSearchUrl(query) {
-        return "/relationship/search/" + encodeURIComponent(query) + "/";
-    }
+    /* ── Search (input only, never polled) ──────────────────── */
 
     function hideSearchResults() {
         searchRequestId += 1;
@@ -184,13 +161,84 @@
         return !els.searchResults.classList.contains("hidden");
     }
 
-    function refreshSearchIfVisible() {
+    async function refreshSearchIfVisible() {
         var trimmed = (els.searchInput.value || "").trim();
         if (isSearchVisible() && trimmed) {
-            return performSearch(trimmed);
+            await performSearch(trimmed);
         }
-        return Promise.resolve();
     }
+
+    function searchUsers(query) {
+        var trimmed = (query || "").trim();
+        clearTimeout(searchDebounceTimer);
+
+        if (!trimmed) {
+            hideSearchResults();
+            return;
+        }
+
+        searchDebounceTimer = setTimeout(function () {
+            performSearch(trimmed);
+        }, SEARCH_DEBOUNCE_MS);
+    }
+
+    async function performSearch(trimmed) {
+        var requestId = ++searchRequestId;
+        els.searchResults.innerHTML = "";
+        els.searchResults.classList.remove("hidden");
+
+        try {
+            var results = await ChatApi.searchUsers(trimmed);
+            if (requestId !== searchRequestId) {
+                return;
+            }
+            renderSearchResults(results);
+        } catch (err) {
+            if (requestId !== searchRequestId) {
+                return;
+            }
+            els.searchResults.innerHTML = '<p class="empty-text">Search failed</p>';
+            els.searchResults.classList.remove("hidden");
+        }
+    }
+
+    function renderSearchResults(results) {
+        els.searchResults.innerHTML = "";
+
+        if (!results || results.length === 0) {
+            els.searchResults.innerHTML = '<p class="empty-text">No users found</p>';
+            els.searchResults.classList.remove("hidden");
+            return;
+        }
+
+        results.forEach(function (item) {
+            if (!isValidStatus(item.status)) {
+                return;
+            }
+
+            var row = document.createElement("div");
+            row.className = "search-result-item";
+
+            var info = document.createElement("div");
+            info.className = "search-result-info";
+            info.innerHTML =
+                '<div class="user-card-name">' + escapeHtml(item.username) + "</div>" +
+                '<span class="status-badge status-' + escapeHtml(item.status) + '">' +
+                escapeHtml(statusLabel(item.status)) + "</span>";
+
+            var actions = document.createElement("div");
+            actions.className = "search-result-actions";
+            renderActionButtons(actions, getSearchActionsForState(item.status), item.username, item.status);
+
+            row.appendChild(info);
+            row.appendChild(actions);
+            els.searchResults.appendChild(row);
+        });
+
+        els.searchResults.classList.remove("hidden");
+    }
+
+    /* ── People lists (refreshed on actions + request poll) ─── */
 
     function setActiveCard(profileUsername) {
         document.querySelectorAll(".user-card").forEach(function (card) {
@@ -221,88 +269,101 @@
         });
     }
 
-    function loadListFromAuthUsernames(container, authUsernames, expectedStatus, entityClass) {
-        container.innerHTML = '<p class="loading-text">Loading...</p>';
-
+    async function loadListFromAuthUsernames(container, authUsernames, expectedStatus, entityClass) {
         if (!authUsernames || authUsernames.length === 0) {
             renderList(container, [], entityClass);
-            return Promise.resolve([]);
+            return [];
         }
 
-        return Promise.all(
+        var resolved = await Promise.all(
             authUsernames.map(function (authUsername) {
                 return resolveAuthUsername(authUsername, expectedStatus);
             })
-        ).then(function (resolved) {
-            var users = resolved.filter(Boolean).map(function (user) {
-                return {
-                    profileUsername: user.profileUsername,
-                    authUsername: user.authUsername,
-                    status: expectedStatus
-                };
-            });
-            renderList(container, users, entityClass);
-            return users;
-        }).catch(function () {
-            container.innerHTML = '<p class="empty-text">Failed to load</p>';
-            return [];
+        );
+
+        var users = resolved.filter(Boolean).map(function (user) {
+            return {
+                profileUsername: user.profileUsername,
+                authUsername: user.authUsername,
+                status: expectedStatus
+            };
         });
+
+        renderList(container, users, entityClass);
+        return users;
     }
 
-    function loadFriends() {
-        return fetchJSON("/relationship/friends/")
-            .then(function (authUsernames) {
-                return loadListFromAuthUsernames(els.friendsList, authUsernames, "friend", "friendEntity");
-            })
-            .catch(function () {
-                els.friendsList.innerHTML = '<p class="empty-text">Failed to load</p>';
-            });
+    async function loadFriends() {
+        try {
+            var authUsernames = await ChatApi.fetchFriends();
+            await loadListFromAuthUsernames(els.friendsList, authUsernames, "friend", "friendEntity");
+        } catch (err) {
+            els.friendsList.innerHTML = '<p class="empty-text">Failed to load</p>';
+        }
     }
 
-    function loadBlockedUsers() {
+    async function loadBlockedUsers() {
         blockedByMe = {};
-        return fetchJSON("/relationship/blocks/")
-            .then(function (authUsernames) {
-                return loadListFromAuthUsernames(els.blockedList, authUsernames, "blocked", "blockedUserEntity")
-                    .then(function (users) {
-                        users.forEach(function (user) {
-                            blockedByMe[user.profileUsername] = true;
-                        });
-                    });
-            })
-            .catch(function () {
-                els.blockedList.innerHTML = '<p class="empty-text">Failed to load</p>';
+        try {
+            var authUsernames = await ChatApi.fetchBlocks();
+            var users = await loadListFromAuthUsernames(els.blockedList, authUsernames, "blocked", "blockedUserEntity");
+            users.forEach(function (user) {
+                blockedByMe[user.profileUsername] = true;
             });
+        } catch (err) {
+            els.blockedList.innerHTML = '<p class="empty-text">Failed to load</p>';
+        }
     }
 
-    function loadRequestsSent() {
-        return fetchJSON("/relationship/requests/sent/")
-            .then(function (authUsernames) {
-                return loadListFromAuthUsernames(els.requestsSentList, authUsernames, "request_sent", "requestSentEntity");
-            })
-            .catch(function () {
-                els.requestsSentList.innerHTML = '<p class="empty-text">Failed to load</p>';
-            });
+    async function loadRequestsSent() {
+        try {
+            var authUsernames = await ChatApi.fetchRequestsSent();
+            await loadListFromAuthUsernames(els.requestsSentList, authUsernames, "request_sent", "requestSentEntity");
+        } catch (err) {
+            els.requestsSentList.innerHTML = '<p class="empty-text">Failed to load</p>';
+        }
     }
 
-    function loadRequestsReceived() {
-        return fetchJSON("/relationship/requests/received/")
-            .then(function (authUsernames) {
-                return loadListFromAuthUsernames(els.requestsReceivedList, authUsernames, "request_received", "requestReceivedEntity");
-            })
-            .catch(function () {
-                els.requestsReceivedList.innerHTML = '<p class="empty-text">Failed to load</p>';
-            });
+    async function loadRequestsReceived() {
+        try {
+            var authUsernames = await ChatApi.fetchRequestsReceived();
+            updateRequestsReceivedBadge(authUsernames.length);
+            await loadListFromAuthUsernames(els.requestsReceivedList, authUsernames, "request_received", "requestReceivedEntity");
+        } catch (err) {
+            els.requestsReceivedList.innerHTML = '<p class="empty-text">Failed to load</p>';
+        }
     }
 
-    function refreshLists() {
-        return Promise.all([
-            loadFriends(),
-            loadBlockedUsers(),
-            loadRequestsSent(),
-            loadRequestsReceived()
-        ]);
+    /** Refresh lists after explicit user actions (not used for friends polling). */
+    async function refreshListsAfterAction(options) {
+        options = options || {};
+        var tasks = [];
+
+        if (options.friends !== false) {
+            tasks.push(loadFriends());
+        }
+        if (options.blocked !== false) {
+            tasks.push(loadBlockedUsers());
+        }
+        if (options.requestsSent !== false) {
+            tasks.push(loadRequestsSent());
+        }
+        if (options.requestsReceived !== false) {
+            tasks.push(loadRequestsReceived());
+        }
+
+        await Promise.all(tasks);
     }
+
+    async function refreshListsInitial() {
+        els.friendsList.innerHTML = '<p class="loading-text">Loading...</p>';
+        els.requestsReceivedList.innerHTML = '<p class="loading-text">Loading...</p>';
+        els.requestsSentList.innerHTML = '<p class="loading-text">Loading...</p>';
+        els.blockedList.innerHTML = '<p class="loading-text">Loading...</p>';
+        await refreshListsAfterAction();
+    }
+
+    /* ── Relationship actions & state rendering ─────────────── */
 
     function makeButton(label, style, onClick) {
         var btn = document.createElement("button");
@@ -313,10 +374,6 @@
         return btn;
     }
 
-    /*
-     * Returns action definitions valid for the given relationship state.
-     * Each action: { label, style, action, type: 'api'|'openChat' }
-     */
     function getActionsForState(status, profileUsername) {
         var actions = [];
 
@@ -359,91 +416,9 @@
                 return;
             }
             container.appendChild(makeButton(def.label, def.style, function () {
-                relationshipAction(actionUrl(def.action, profileUsername), profileUsername);
+                relationshipAction(ChatApi.actionUrl(def.action, profileUsername), profileUsername);
             }));
         });
-    }
-
-    function renderSearchResults(results) {
-        els.searchResults.innerHTML = "";
-
-        if (!results || results.length === 0) {
-            els.searchResults.innerHTML = '<p class="empty-text">No users found</p>';
-            els.searchResults.classList.remove("hidden");
-            return;
-        }
-
-        results.forEach(function (item) {
-            if (!isValidStatus(item.status)) {
-                return;
-            }
-
-            var row = document.createElement("div");
-            row.className = "search-result-item";
-
-            var info = document.createElement("div");
-            info.className = "search-result-info";
-            info.innerHTML =
-                '<div class="user-card-name">' + escapeHtml(item.username) + "</div>" +
-                '<span class="status-badge status-' + escapeHtml(item.status) + '">' +
-                escapeHtml(statusLabel(item.status)) + "</span>";
-
-            var actions = document.createElement("div");
-            actions.className = "search-result-actions";
-
-            var searchActions = getSearchActionsForState(item.status);
-            renderActionButtons(actions, searchActions, item.username, item.status);
-
-            row.appendChild(info);
-            row.appendChild(actions);
-            els.searchResults.appendChild(row);
-        });
-
-        els.searchResults.classList.remove("hidden");
-    }
-
-    function performSearch(trimmed) {
-        var requestId = ++searchRequestId;
-
-        els.searchResults.innerHTML = "";
-        els.searchResults.classList.remove("hidden");
-
-        console.log("search query sent:", trimmed);
-
-        return fetchJSON(buildSearchUrl(trimmed))
-            .then(function (results) {
-                if (requestId !== searchRequestId) {
-                    return;
-                }
-                console.log("response received:", results);
-                console.log("number of results returned:", results ? results.length : 0);
-                renderSearchResults(results);
-            })
-            .catch(function (error) {
-                if (requestId !== searchRequestId) {
-                    return;
-                }
-                console.log("search request failed:", error);
-                els.searchResults.innerHTML = '<p class="empty-text">Search failed</p>';
-                els.searchResults.classList.remove("hidden");
-            });
-    }
-
-    function searchUsers(query) {
-        var trimmed = (query || "").trim();
-
-        clearTimeout(searchDebounceTimer);
-
-        if (!trimmed) {
-            hideSearchResults();
-            return Promise.resolve();
-        }
-
-        searchDebounceTimer = setTimeout(function () {
-            performSearch(trimmed);
-        }, SEARCH_DEBOUNCE_MS);
-
-        return Promise.resolve();
     }
 
     function hideMessageInput() {
@@ -452,8 +427,6 @@
 
     function showMessageInput() {
         els.messageInputArea.classList.remove("hidden");
-        els.messageInput.value = "";
-        els.messageInput.focus();
     }
 
     function hideHeaderActions() {
@@ -491,72 +464,86 @@
         }
     }
 
-    function loadMessages(user) {
+    /* ── Messages (DOM updates separated from fetch) ────────── */
+
+    function isNearBottom(container) {
+        var distance = container.scrollHeight - container.scrollTop - container.clientHeight;
+        return distance <= RealtimeService.SCROLL_NEAR_BOTTOM_PX;
+    }
+
+    function renderMessages(messages, options) {
+        options = options || {};
+        var forceScroll = Boolean(options.forceScroll);
+        var wasNearBottom = isNearBottom(els.messagesArea);
+
+        els.messagesArea.classList.toggle("has-messages", messages && messages.length > 0);
+
+        if (!messages || messages.length === 0) {
+            els.noChatSelected.classList.add("hidden");
+            els.messagesList.innerHTML = '<p class="empty-chat">No messages yet</p>';
+            ChatDebug.domUpdated("messagesList", "empty");
+            return;
+        }
+
+        els.noChatSelected.classList.add("hidden");
+        els.messagesList.innerHTML = "";
+
+        messages.forEach(function (msgObj) {
+            var senderKey = Object.keys(msgObj)[0];
+            var content = msgObj[senderKey];
+            var bubble = document.createElement("div");
+            bubble.className = senderKey === currentAuthUsername ? "myChatDiv" : "theirChatDiv";
+            bubble.textContent = content;
+            els.messagesList.appendChild(bubble);
+        });
+
+        if (forceScroll || wasNearBottom) {
+            els.messagesArea.scrollTop = els.messagesArea.scrollHeight;
+        }
+        ChatDebug.domUpdated("messagesList", messages.length + " bubble(s)");
+    }
+
+    async function loadMessages(user, options) {
+        options = options || {};
         showChatError("");
 
-        return fetch("/messanging/recv/" + encodeURIComponent(user.profileUsername) + "/", {
-            credentials: "same-origin"
-        }).then(function (res) {
-            return res.text().then(function (text) {
-                if (res.status === 404) {
-                    throw new Error("User not found");
-                }
-                if (!res.ok) {
-                    throw new Error(text || "Failed to load messages");
-                }
-                return JSON.parse(text);
-            });
-        }).then(function (messages) {
-            els.messagesList.innerHTML = "";
-            els.messagesArea.classList.toggle("has-messages", messages && messages.length > 0);
-
-            if (!messages || messages.length === 0) {
-                els.noChatSelected.classList.add("hidden");
-                els.messagesList.innerHTML = '<p class="empty-chat">No messages yet</p>';
-                return;
-            }
-
-            els.noChatSelected.classList.add("hidden");
-
-            messages.forEach(function (msgObj) {
-                var senderKey = Object.keys(msgObj)[0];
-                var content = msgObj[senderKey];
-                var bubble = document.createElement("div");
-                bubble.className = senderKey === currentAuthUsername ? "myChatDiv" : "theirChatDiv";
-                bubble.textContent = content;
-                els.messagesList.appendChild(bubble);
-            });
-
-            els.messagesArea.scrollTop = els.messagesArea.scrollHeight;
-        }).catch(function (err) {
+        try {
+            var messages = await ChatApi.fetchMessages(user.profileUsername);
+            renderMessages(messages, { forceScroll: options.forceScroll !== false });
+            RealtimeService.setMessagesCache(messages);
+        } catch (err) {
             els.messagesList.innerHTML = "";
             els.messagesArea.classList.remove("has-messages");
             els.noChatSelected.classList.add("hidden");
             showChatError(err.message || "Failed to load messages");
-        });
+        }
     }
 
-    function selectUser(user) {
+    /* ── Conversation selection ───────────────────────────────── */
+
+    async function selectUser(user) {
         if (!user || !user.profileUsername || !isValidStatus(user.status)) {
             return;
         }
+
         selectedUser = user;
+        RealtimeService.setActiveConversation(user.profileUsername, user.status);
         renderChatState(user);
-        loadMessages(user);
+        await loadMessages(user, { forceScroll: true });
     }
 
-    function selectUserWithFreshState(profileUsername) {
-        return fetchUserStatus(profileUsername).then(function (user) {
-            if (user) {
-                selectUser(user);
-            } else {
-                showChatError("Could not refresh user state");
-            }
-        });
+    async function selectUserWithFreshState(profileUsername) {
+        var user = await fetchUserStatus(profileUsername);
+        if (user) {
+            await selectUser(user);
+        } else {
+            showChatError("Could not refresh user state");
+        }
     }
 
     function clearChat() {
         selectedUser = null;
+        RealtimeService.clearActiveConversation();
         els.chatHeader.textContent = "";
         els.messagesList.innerHTML = "";
         els.messagesArea.classList.remove("has-messages");
@@ -568,26 +555,26 @@
         setActiveCard("");
     }
 
-    function isActionSuccess(text) {
-        return text === "success" || text === "succss";
+    /* ── Relationship action handlers ─────────────────────────── */
+
+    async function afterRelationshipAction(profileUsername) {
+        await refreshListsAfterAction();
+        await refreshSearchIfVisible();
+        RealtimeService.resetRequestsCache();
+
+        if (selectedUser && selectedUser.profileUsername === profileUsername) {
+            await selectUserWithFreshState(profileUsername);
+        }
     }
 
-    function afterRelationshipAction(profileUsername) {
-        return refreshLists().then(function () {
-            return refreshSearchIfVisible();
-        }).then(function () {
-            if (selectedUser && selectedUser.profileUsername === profileUsername) {
-                return selectUserWithFreshState(profileUsername);
-            }
-        });
-    }
-
-    function relationshipAction(url, profileUsername) {
+    async function relationshipAction(url, profileUsername) {
         showChatError("");
 
-        return fetchText(url, { credentials: "same-origin" }).then(function (result) {
+        try {
+            var result = await ChatApi.relationshipAction(url);
             if (result.ok && isActionSuccess(result.text)) {
-                return afterRelationshipAction(profileUsername);
+                await afterRelationshipAction(profileUsername);
+                return;
             }
 
             if (url.indexOf("/unblock/") !== -1) {
@@ -595,12 +582,12 @@
             } else {
                 showChatError("Action failed");
             }
-        }).catch(function () {
+        } catch (err) {
             showChatError("Action failed");
-        });
+        }
     }
 
-    function sendMessage() {
+    async function sendMessage() {
         if (!selectedUser || selectedUser.status !== "friend") {
             return;
         }
@@ -612,43 +599,33 @@
 
         showChatError("");
 
-        fetchText("/messanging/send/" + encodeURIComponent(selectedUser.profileUsername) + "/", {
-            method: "POST",
-            credentials: "same-origin",
-            headers: {
-                "Content-Type": "application/json",
-                "X-CSRFToken": getCookie("csrftoken")
-            },
-            body: JSON.stringify({ content: content })
-        }).then(function (result) {
+        try {
+            var result = await ChatApi.sendMessage(selectedUser.profileUsername, content);
             if (result.status === 404) {
                 showChatError("User not found");
                 return;
             }
             if (result.ok && result.text === "success") {
                 els.messageInput.value = "";
-                loadMessages(selectedUser);
+                var messages = await ChatApi.fetchMessages(selectedUser.profileUsername);
+                RealtimeService.setMessagesCache(messages);
+                renderMessages(messages, { forceScroll: true });
                 return;
             }
             showChatError("Failed to send message");
-        }).catch(function () {
+        } catch (err) {
             showChatError("Failed to send message");
-        });
+        }
     }
 
-    function changeUsername() {
+    async function changeUsername() {
         var newUsername = els.newUsernameInput.value.trim();
         if (!newUsername) {
             return;
         }
 
-        fetchText("/profile/changeusername/" + encodeURIComponent(newUsername), {
-            method: "POST",
-            credentials: "same-origin",
-            headers: {
-                "X-CSRFToken": getCookie("csrftoken")
-            }
-        }).then(function (result) {
+        try {
+            var result = await ChatApi.changeUsername(newUsername);
             els.usernameMessage.classList.remove("hidden", "success", "error");
 
             if (result.ok && result.text === "success") {
@@ -663,12 +640,83 @@
                 els.usernameMessage.textContent = "Failed to change username";
                 els.usernameMessage.classList.add("error");
             }
-        }).catch(function () {
+        } catch (err) {
             els.usernameMessage.classList.remove("hidden");
             els.usernameMessage.textContent = "Failed to change username";
             els.usernameMessage.classList.add("error");
-        });
+        }
     }
+
+    /* ── Realtime handlers (v0 polling → v1 WebSocket swap here) ─ */
+
+    function handlePolledMessages(messages) {
+        if (!selectedUser) {
+            return;
+        }
+        renderMessages(messages, { forceScroll: false });
+    }
+
+    async function handlePolledRequestsReceived(authUsernames, meta) {
+        updateRequestsReceivedBadge(authUsernames.length);
+        if (meta.changed) {
+            await loadListFromAuthUsernames(
+                els.requestsReceivedList,
+                authUsernames,
+                "request_received",
+                "requestReceivedEntity"
+            );
+        }
+    }
+
+    async function handleRelationshipStatusChange(event) {
+        if (!selectedUser || selectedUser.profileUsername !== event.profileUsername) {
+            return;
+        }
+
+        var oldStatus = event.oldStatus;
+        var newStatus = event.newStatus;
+
+        selectedUser.status = newStatus;
+        RealtimeService.setActiveConversation(event.profileUsername, newStatus);
+        renderChatState(selectedUser);
+
+        if (newStatus === "friend" || oldStatus === "friend") {
+            await loadFriends();
+        }
+        if (newStatus === "blocked" || oldStatus === "blocked") {
+            await loadBlockedUsers();
+        }
+        if (newStatus === "request_sent" || oldStatus === "request_sent") {
+            await loadRequestsSent();
+        }
+        if (newStatus === "request_received" || oldStatus === "request_received") {
+            await loadRequestsReceived();
+        }
+
+        await refreshSearchIfVisible();
+    }
+
+    function handlePollError(context, err) {
+        ChatDebug.requestFailed("POLL-HANDLER:" + context, context, err);
+    }
+
+    function verifyDependencies() {
+        var missing = [];
+        if (typeof ChatDebug === "undefined") {
+            missing.push("ChatDebug (debug.js)");
+        }
+        if (typeof ChatApi === "undefined") {
+            missing.push("ChatApi (api.js)");
+        }
+        if (typeof RealtimeService === "undefined") {
+            missing.push("RealtimeService (polling.js)");
+        }
+        if (missing.length) {
+            throw new Error("Missing scripts: " + missing.join(", "));
+        }
+    }
+
+    /* ── Events ───────────────────────────────────────────────── */
 
     function handlePeoplePanelClick(event) {
         var card = event.target.closest(".user-card");
@@ -711,11 +759,37 @@
         els.peoplePanel.addEventListener("click", handlePeoplePanelClick);
     }
 
-    function init() {
-        initElements();
-        currentAuthUsername = els.currentUsername.dataset.authUsername || "";
-        bindEvents();
-        refreshLists();
+    function initRealtime() {
+        RealtimeService.onMessages(handlePolledMessages);
+        RealtimeService.onRequestsReceived(handlePolledRequestsReceived);
+        RealtimeService.onRelationshipStatus(handleRelationshipStatusChange);
+        RealtimeService.onPollError(handlePollError);
+        RealtimeService.start();
+    }
+
+    async function init() {
+        try {
+            verifyDependencies();
+            ChatDebug.init("chat.js init() starting", {
+                readyState: document.readyState,
+                debug: ChatDebug.enabled
+            });
+
+            initElements();
+            currentAuthUsername = els.currentUsername.dataset.authUsername || "";
+            ChatDebug.init("DOM elements bound", { authUsername: currentAuthUsername });
+
+            bindEvents();
+            initRealtime();
+            await refreshListsInitial();
+
+            ChatDebug.init("chat.js init() complete — polling active");
+        } catch (err) {
+            console.error("[ChatXII FATAL]", err);
+            if (typeof ChatDebug !== "undefined") {
+                ChatDebug.requestFailed("INIT", "startup", err);
+            }
+        }
     }
 
     if (document.readyState === "loading") {

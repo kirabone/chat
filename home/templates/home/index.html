@@ -23,7 +23,7 @@
                     <div id="friendsList" class="user-list"></div>
                 </section>
                 <section class="people-section">
-                    <h3>Requests Received</h3>
+                    <h3>Requests Received <span id="requestsReceivedBadge" class="section-badge hidden" aria-live="polite">0</span></h3>
                     <div id="requestsReceivedList" class="user-list"></div>
                 </section>
                 <section class="people-section">
@@ -76,6 +76,9 @@
         </aside>
     </div>
 
+    <script src="{% static 'home/js/debug.js' %}"></script>
+    <script src="{% static 'home/js/api.js' %}"></script>
+    <script src="{% static 'home/js/polling.js' %}"></script>
     <script src="{% static 'home/js/chat.js' %}"></script>
 </body>
 </html>

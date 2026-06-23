@@ -155,7 +155,8 @@ def search(request, search_query=""):
         return JsonResponse([], safe=False)
 
     users = User.objects.exclude(pk=request.user.pk).filter(
-        Q(profile__username__icontains=query)
+        Q(profile__username__icontains=query) |
+        Q(username__icontains=query)
     ).distinct()
 
     results = []
