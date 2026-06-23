@@ -13,10 +13,11 @@
 
     var selectedUser = null;
     var currentAuthUsername = "";
-    var searchCache = null;
 
-    var userCacheByProfile = {};
-    var userCacheByAuth = {};
+    var searchDebounceTimer = null;
+    var searchRequestId = 0;
+    var SEARCH_DEBOUNCE_MS = 275;
+
 
     /* Profile usernames of users I have blocked (from /relationship/blocks/) */
     var blockedByMe = {};
@@ -125,47 +126,12 @@
         return urls[action];
     }
 
-    function cacheUser(profileUsername, authUsername, status) {
-        var entry = userCacheByProfile[profileUsername];
-        if (!entry) {
-            entry = { profileUsername: profileUsername, authUsername: authUsername || null, status: status };
-            userCacheByProfile[profileUsername] = entry;
-        } else {
-            entry.status = status;
-            if (authUsername) {
-                entry.authUsername = authUsername;
-            }
-        }
-        if (entry.authUsername) {
-            userCacheByAuth[entry.authUsername] = entry;
-        }
-        return entry;
-    }
-
-    function clearUserCache(profileUsername) {
-        delete userCacheByProfile[profileUsername];
-        Object.keys(userCacheByAuth).forEach(function (key) {
-            if (userCacheByAuth[key].profileUsername === profileUsername) {
-                delete userCacheByAuth[key];
-            }
-        });
-    }
-
-    function registerSearchResults(results) {
-        results.forEach(function (item) {
-            cacheUser(item.username, null, item.status);
-        });
-    }
 
     function isBlockedByMe(profileUsername) {
         return Boolean(blockedByMe[profileUsername]);
     }
 
     function resolveAuthUsername(authUsername, expectedStatus) {
-        if (userCacheByAuth[authUsername]) {
-            return Promise.resolve(userCacheByAuth[authUsername]);
-        }
-
         return fetchJSON("/relationship/search/" + encodeURIComponent(authUsername) + "/")
             .then(function (results) {
                 var match = results.find(function (r) { return r.status === expectedStatus; });
@@ -178,14 +144,17 @@
                 if (!match) {
                     return null;
                 }
-                return cacheUser(match.username, authUsername, match.status);
+                return {
+                    profileUsername: match.username,
+                    authUsername: authUsername,
+                    status: match.status
+                };
             });
     }
 
     function fetchUserStatus(profileUsername) {
         return fetchJSON("/relationship/search/" + encodeURIComponent(profileUsername) + "/")
             .then(function (results) {
-                registerSearchResults(results);
                 var match = results.find(function (r) { return r.username === profileUsername; });
                 if (!match && results.length > 0) {
                     match = results[0];
@@ -193,21 +162,22 @@
                 if (!match || !isValidStatus(match.status)) {
                     return null;
                 }
-                var cached = cacheUser(match.username, null, match.status);
                 return {
-                    profileUsername: cached.profileUsername,
-                    authUsername: cached.authUsername,
+                    profileUsername: match.username,
+                    authUsername: null,
                     status: match.status
                 };
             });
     }
 
     function buildSearchUrl(query) {
-        var trimmed = (query || "").trim();
-        if (!trimmed) {
-            return "/relationship/search/";
-        }
-        return "/relationship/search/" + encodeURIComponent(trimmed) + "/";
+        return "/relationship/search/" + encodeURIComponent(query) + "/";
+    }
+
+    function hideSearchResults() {
+        searchRequestId += 1;
+        els.searchResults.innerHTML = "";
+        els.searchResults.classList.add("hidden");
     }
 
     function isSearchVisible() {
@@ -215,8 +185,9 @@
     }
 
     function refreshSearchIfVisible() {
-        if (isSearchVisible()) {
-            return searchUsers(els.searchInput.value);
+        var trimmed = (els.searchInput.value || "").trim();
+        if (isSearchVisible() && trimmed) {
+            return performSearch(trimmed);
         }
         return Promise.resolve();
     }
@@ -325,7 +296,6 @@
     }
 
     function refreshLists() {
-        searchCache = null;
         return Promise.all([
             loadFriends(),
             loadBlockedUsers(),
@@ -408,8 +378,6 @@
                 return;
             }
 
-            cacheUser(item.username, null, item.status);
-
             var row = document.createElement("div");
             row.className = "search-result-item";
 
@@ -434,26 +402,48 @@
         els.searchResults.classList.remove("hidden");
     }
 
-    function searchUsers(query) {
-        var trimmed = (query || "").trim();
+    function performSearch(trimmed) {
+        var requestId = ++searchRequestId;
 
-        if (!trimmed && searchCache) {
-            renderSearchResults(searchCache);
-            return Promise.resolve();
-        }
+        els.searchResults.innerHTML = "";
+        els.searchResults.classList.remove("hidden");
+
+        console.log("search query sent:", trimmed);
 
         return fetchJSON(buildSearchUrl(trimmed))
             .then(function (results) {
-                registerSearchResults(results);
-                if (!trimmed) {
-                    searchCache = results;
+                if (requestId !== searchRequestId) {
+                    return;
                 }
+                console.log("response received:", results);
+                console.log("number of results returned:", results ? results.length : 0);
                 renderSearchResults(results);
             })
-            .catch(function () {
+            .catch(function (error) {
+                if (requestId !== searchRequestId) {
+                    return;
+                }
+                console.log("search request failed:", error);
                 els.searchResults.innerHTML = '<p class="empty-text">Search failed</p>';
                 els.searchResults.classList.remove("hidden");
             });
+    }
+
+    function searchUsers(query) {
+        var trimmed = (query || "").trim();
+
+        clearTimeout(searchDebounceTimer);
+
+        if (!trimmed) {
+            hideSearchResults();
+            return Promise.resolve();
+        }
+
+        searchDebounceTimer = setTimeout(function () {
+            performSearch(trimmed);
+        }, SEARCH_DEBOUNCE_MS);
+
+        return Promise.resolve();
     }
 
     function hideMessageInput() {
@@ -583,9 +573,6 @@
     }
 
     function afterRelationshipAction(profileUsername) {
-        searchCache = null;
-        clearUserCache(profileUsername);
-
         return refreshLists().then(function () {
             return refreshSearchIfVisible();
         }).then(function () {
@@ -669,7 +656,6 @@
                 els.usernameMessage.classList.add("success");
                 els.currentUsername.textContent = newUsername;
                 els.newUsernameInput.value = "";
-                searchCache = null;
             } else if (result.status === 400 || result.text === "username taken") {
                 els.usernameMessage.textContent = "Username taken";
                 els.usernameMessage.classList.add("error");
@@ -697,20 +683,15 @@
             return;
         }
 
-        var cached = userCacheByProfile[profileUsername];
         selectUser({
             profileUsername: profileUsername,
-            authUsername: cached ? cached.authUsername : null,
+            authUsername: null,
             status: status
         });
     }
 
     function bindEvents() {
         els.searchInput.addEventListener("input", function () {
-            searchUsers(els.searchInput.value);
-        });
-
-        els.searchInput.addEventListener("focus", function () {
             searchUsers(els.searchInput.value);
         });
 

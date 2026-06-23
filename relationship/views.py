@@ -150,20 +150,13 @@ def _relationship_status(request_user, target_user):
 @login_required
 @require_http_methods(["GET"])
 def search(request, search_query=""):
-    if search_query is None:
-        search_query = ""
+    query = (search_query or "").strip()
+    if not query:
+        return JsonResponse([], safe=False)
 
-    users = User.objects.exclude(pk=request.user.pk)
-
-    if search_query:
-        users = users.filter(
-            Q(username__icontains=search_query) |
-            Q(first_name__icontains=search_query) |
-            Q(last_name__icontains=search_query) |
-            Q(profile__username__icontains=search_query)
-        )
-
-    users = users.distinct()
+    users = User.objects.exclude(pk=request.user.pk).filter(
+        Q(profile__username__icontains=query)
+    ).distinct()
 
     results = []
 
