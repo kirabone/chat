@@ -5,18 +5,22 @@ from django.http import JsonResponse, HttpResponse
 from django.db.models import Q
 from userProfile.models import Profile
 import json
+from django.contrib.auth.decorators import login_required
+from django.views.decorators.http import require_http_methods
 
-
+@login_required
+@require_http_methods(["GET"])
 def loadChat(request, receiverUsername):
     receiver = Profile.objects.filter(username = receiverUsername).first()
     if not receiver:
         return HttpResponse("user not found", status=404)
-    messages = Messages.objects.filter(Q(receiver = request.user , sender = receiver.user) | Q(receiver = receiver.user, sender = request.user))
+    messages = Messages.objects.filter(Q(receiver = request.user , sender = receiver.user) | Q(receiver = receiver.user, sender = request.user)).order_by("id")
     messageList = []
     for message in messages:
         messageList.append({message.sender.username:message.content})
     return JsonResponse(messageList, safe=False)
-
+@login_required
+@require_http_methods(["POST"])
 def sendChat(request, receiverUsername):
     receiver = Profile.objects.filter(username = receiverUsername).first()
     if not receiver:

@@ -4,7 +4,11 @@ from django.contrib.auth.models import User
 from django.http import JsonResponse, HttpResponse
 from django.db.models import Q
 from userProfile.models import Profile
+from django.contrib.auth.decorators import login_required
+from django.views.decorators.http import require_http_methods
 
+@login_required
+@require_http_methods(["GET"])
 def friendList(request):    
     friends = Relationship.objects.filter(Q(status = "F", actor = request.user) | Q(status= "F" ,acted = request.user))
     friendList = []
@@ -14,7 +18,9 @@ def friendList(request):
         else:
             friendList.append(friend.actor.username)
     return JsonResponse(friendList, safe=False)
-        
+
+@login_required
+@require_http_methods(["GET"])      
 def blockList(request):
     blocked = Relationship.objects.filter(status = "B", actor = request.user)
     blockList = []
@@ -22,6 +28,8 @@ def blockList(request):
         blockList.append(block.acted.username)
     return JsonResponse(blockList, safe=False)
     
+@login_required
+@require_http_methods(["GET"])    
 def requestSent(request):
     requests = Relationship.objects.filter(status = "R", actor = request.user)
     requestList = []
@@ -29,6 +37,8 @@ def requestSent(request):
         requestList.append(relation.acted.username)
     return JsonResponse(requestList, safe=False)
 
+@login_required
+@require_http_methods(["GET"])
 def requestRecv(request):
     requests = Relationship.objects.filter(status = "R", acted = request.user)
     requestList = []
@@ -36,6 +46,8 @@ def requestRecv(request):
         requestList.append(relation.actor.username)
     return JsonResponse(requestList, safe=False)
 
+@login_required
+@require_http_methods(["GET"])
 def blockUser(request, user):
     target = Profile.objects.filter(username = user).first()
     if not target:
@@ -53,6 +65,8 @@ def blockUser(request, user):
         Relationship.objects.create(acted = target.user, actor = request.user, status="B")
         return HttpResponse("success")
 
+@login_required
+@require_http_methods(["GET"])
 def unblockUser(request, user):
     target = Profile.objects.filter(username = user).first()
     if not target:
@@ -60,7 +74,8 @@ def unblockUser(request, user):
     Relationship.objects.filter(acted = target.user, actor = request.user, status = 'B').delete()
     return HttpResponse("succss")
    
-
+@login_required
+@require_http_methods(["GET"])
 def request(request, user):
     target = Profile.objects.filter(username = user).first()
     if not target:
@@ -71,6 +86,8 @@ def request(request, user):
         Relationship.objects.create(acted = target.user, actor = request.user, status = 'R')
         return HttpResponse("success")
     
+@login_required
+@require_http_methods(["GET"])
 def reject(request, user):
     target = Profile.objects.filter(username = user).first()
     if not target:
@@ -81,6 +98,8 @@ def reject(request, user):
     else:
         return HttpResponse("failed")
 
+@login_required
+@require_http_methods(["GET"])
 def accept(request, user):
     target = Profile.objects.filter(username = user).first()
     if not target:
@@ -91,7 +110,9 @@ def accept(request, user):
         return HttpResponse("success")
     else:
         return HttpResponse("failed")
-    
+
+@login_required
+@require_http_methods(["GET"])
 def cancelRequest(request, user):
     target = Profile.objects.filter(username = user).first()
     if not target: 
@@ -99,6 +120,7 @@ def cancelRequest(request, user):
     if Relationship.objects.filter(actor = request.user, acted = target.user, status="R").exists():
         Relationship.objects.filter(actor = request.user, acted = target.user, status="R").delete()
         return HttpResponse("success")
+
 
 def _relationship_status(request_user, target_user):
     if Relationship.objects.filter(
@@ -125,7 +147,8 @@ def _relationship_status(request_user, target_user):
 
     return "none"
 
-
+@login_required
+@require_http_methods(["GET"])
 def search(request, search_query=""):
     if search_query is None:
         search_query = ""
@@ -161,6 +184,8 @@ def search(request, search_query=""):
 
     return JsonResponse(results, safe=False)
 
+@login_required
+@require_http_methods(["GET"])
 def unfriend(request, user):
 
     target = Profile.objects.filter(username=user).first()
@@ -175,14 +200,5 @@ def unfriend(request, user):
     
     return HttpResponse("success")
 
-    
-def unfriend(request, user):
-    target = Profile.objects.filter(username = user).first()
-    if not target:
-        return HttpResponse("failed")
-    if Relationship.objects.filter(Q(actor = request.user, acted = target.user, status="F") | Q(acted = request.user, actor = target.user, status="F") ):
-        Relationship.objects.filter(Q(actor = request.user, acted = target.user, status="F") | Q(acted = request.user, actor = target.user, status="F") ).delete()
-        return HttpResponse("success")
-    return HttpResponse("failed")
 
 

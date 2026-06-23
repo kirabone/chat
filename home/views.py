@@ -1,9 +1,14 @@
 from django.shortcuts import render
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.decorators import login_required
+from django.views.decorators.http import require_http_methods
 
+@login_required
+@require_http_methods(["GET"])
 def landing(request):
     return render(request, "landing/index.html")
 
-@login_required(login_url="/accounts/google/login/")
+@login_required
+@require_http_methods(["GET"])
 def home(request):
     return render(request, "home/index.html")
