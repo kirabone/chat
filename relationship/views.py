@@ -98,8 +98,71 @@ def cancelRequest(request, user):
     if Relationship.objects.filter(actor = request.user, acted = target.user, status="R").exists():
         Relationship.objects.filter(actor = request.user, acted = target.user, status="R").delete()
         return HttpResponse("success")
-    else:
+
+def search(request,search_query):
+
+     
+    
+    if not search_query or len(search_query) < 1:
+        return JsonResponse({"error": "Search query required"}, status=400)
+    
+
+    profiles = Profile.objects.filter(
+        Q(username__icontains=search_query) | Q(user__first_name__icontains=search_query) | Q(user__last_name__icontains=search_query)
+    ).exclude(user=request.user)
+    
+    results = []
+    
+    for profile in profiles:
+        target_user = profile.user
+        
+        
+        status = "none"
+        
+        if Relationship.objects.filter(
+            Q(actor=request.user, acted=target_user, status="B") |
+            Q(actor=target_user, acted=request.user, status="B")
+        ).exists():
+            status = "blocked"
+  
+        elif Relationship.objects.filter(
+            actor=request.user, acted=target_user, status="F"
+        ).exists() and Relationship.objects.filter(
+            actor=target_user, acted=request.user, status="F"
+        ).exists():
+            status = "friend"
+       
+        elif Relationship.objects.filter(
+            actor=request.user, acted=target_user, status="R"
+        ).exists():
+            status = "request_sent"
+        
+        elif Relationship.objects.filter(
+            actor=target_user, acted=request.user, status="R"
+        ).exists():
+            status = "request_received"
+        
+        results.append({
+            "username": profile.username,
+            "status": status
+        })
+    
+    return JsonResponse(results, safe=False)
+
+def unfriend(request, user):
+
+    target = Profile.objects.filter(username=user).first()
+    if not target:
         return HttpResponse("failed")
+    
+    
+    Relationship.objects.filter(
+        Q(actor=request.user, acted=target.user, status="F") |
+        Q(actor=target.user, acted=request.user, status="F")
+    ).delete()
+    
+    return HttpResponse("success")
+
     
 def unfriend(request, user):
     target = Profile.objects.filter(username = user).first()
