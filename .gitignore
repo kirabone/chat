@@ -1,0 +1,9 @@
+.env
+report.md
+db.sqlite3
+userProfile/__pychache__/
+relationships/__pychache__/
+messaging/__pychache__/
+home/__pychache__/
+chatxi/__pychache__/
+.agents
